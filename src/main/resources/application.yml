@@ -16,3 +16,7 @@ dcre:
   amount-scale: ${DCRE_AMOUNT_SCALE:2}
   v1-enabled: ${DCRE_V1_ENABLED:false}
   flow-dc: ${DCRE_FLOW_DC:true}
+
+  cde:
+    # dev default 0 = due today (unit tests prove warehousing); prod overrides via env
+    offset-days: ${DCRE_CDE_OFFSET_DAYS:0}
