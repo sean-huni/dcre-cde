@@ -23,3 +23,5 @@ dcre:
   cde:
     # dev default 0 = due today (unit tests prove warehousing); prod overrides via env
     offset-days: ${DCRE_CDE_OFFSET_DAYS:0}
+    # Holiday-calendar country for the R-38 roll (public_holiday is synced by dcre-hcs)
+    country: ${DCRE_CDE_COUNTRY:ZA}

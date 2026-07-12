@@ -52,6 +52,11 @@ class CdeJobTest {
                 + " arrival_id UUID UNIQUE, business_date VARCHAR(8))");
         jdbc.execute("CREATE TABLE IF NOT EXISTS validation_log (id UUID DEFAULT gen_random_uuid() PRIMARY KEY,"
                 + " arrival_id UUID, sequence INT, outcome VARCHAR(32), UNIQUE (arrival_id, sequence))");
+        jdbc.execute("CREATE TABLE IF NOT EXISTS tx_entry (id UUID DEFAULT gen_random_uuid() PRIMARY KEY,"
+                + " arrival_id UUID, sequence INT, e2e VARCHAR(35), UNIQUE (arrival_id, sequence))");
+        // Fail-closed guard (R-38): the collection year must have at least one synced ZA holiday.
+        jdbc.update("INSERT INTO public_holiday (country, holiday_date) VALUES (?,?)"
+                + " ON CONFLICT (country, holiday_date) DO NOTHING", "ZA", "2026-12-25");
         jdbc.update("UPSERT INTO tx_header (arrival_id, business_date) VALUES (?,?)", arrival, "20260711");
         for (int i = 1; i <= 30; i++) {
             jdbc.update("UPSERT INTO validation_log (arrival_id, sequence, outcome) VALUES (?,?,?)",
