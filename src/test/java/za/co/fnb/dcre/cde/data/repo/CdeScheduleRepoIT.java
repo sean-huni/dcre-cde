@@ -11,9 +11,11 @@ import org.testcontainers.containers.CockroachContainer;
 import org.testcontainers.utility.DockerImageName;
 
 import java.time.LocalDate;
+import java.time.OffsetDateTime;
 import java.util.UUID;
 
 import static org.junit.jupiter.api.Assertions.assertEquals;
+import static org.junit.jupiter.api.Assertions.assertTrue;
 
 /**
  * R-41 set-based schedule write: one INSERT..SELECT covers every PASS row of the
@@ -69,6 +71,10 @@ class CdeScheduleRepoIT {
         UUID arrival = seedVerdicts(2, 0);
 
         assertEquals(2, repo.upsertAllPassRows(arrival, LocalDate.of(2026, 7, 15)));
+        OffsetDateTime updatedAfterFirstRun = jdbc.queryForObject(
+                "SELECT updated_at FROM cde_schedule WHERE arrival_id=? AND sequence=1",
+                OffsetDateTime.class, arrival);
+
         assertEquals(2, repo.upsertAllPassRows(arrival, LocalDate.of(2026, 7, 16)));
 
         assertEquals(2, jdbc.queryForObject(
@@ -77,6 +83,24 @@ class CdeScheduleRepoIT {
         assertEquals(2, jdbc.queryForObject(
                 "SELECT count(*) FROM cde_schedule WHERE arrival_id=? AND process_date='2026-07-16'",
                 Integer.class, arrival));
+        OffsetDateTime updatedAfterRerun = jdbc.queryForObject(
+                "SELECT updated_at FROM cde_schedule WHERE arrival_id=? AND sequence=1",
+                OffsetDateTime.class, arrival);
+        assertTrue(updatedAfterRerun.isAfter(updatedAfterFirstRun),
+                "conflict-update must bump updated_at: " + updatedAfterFirstRun + " -> " + updatedAfterRerun);
+        assertEquals(1L, jdbc.queryForObject(
+                "SELECT version FROM cde_schedule WHERE arrival_id=? AND sequence=1", Long.class, arrival),
+                "conflict-update must increment the optimistic-lock version");
+    }
+
+    /** A-7 pin: zero PASS rows is a valid no-op run, never an error. */
+    @Test
+    void zeroPassRowsIsAValidNoOp() {
+        UUID arrival = seedVerdicts(0, 2);
+
+        assertEquals(0, repo.upsertAllPassRows(arrival, LocalDate.of(2026, 7, 15)));
+        assertEquals(0, jdbc.queryForObject(
+                "SELECT count(*) FROM cde_schedule WHERE arrival_id=?", Integer.class, arrival));
     }
 
     private UUID seedVerdicts(int passCount, int failCount) {

@@ -16,5 +16,4 @@ public class PassVerdictView {
     private String outcome;
 
     public Integer getSequence() { return sequence; }
-    public String getOutcome() { return outcome; }
 }

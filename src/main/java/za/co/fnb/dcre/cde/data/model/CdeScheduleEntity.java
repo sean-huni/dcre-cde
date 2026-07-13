@@ -13,14 +13,6 @@ public class CdeScheduleEntity extends BaseEntity {
     private Integer sequence;
     private LocalDate processDate;
 
-    public static CdeScheduleEntity of(UUID arrivalId, int sequence, LocalDate processDate) {
-        CdeScheduleEntity e = new CdeScheduleEntity();
-        e.arrivalId = arrivalId;
-        e.sequence = sequence;
-        e.processDate = processDate;
-        return e;
-    }
-
     public UUID getArrivalId() { return arrivalId; }
     public Integer getSequence() { return sequence; }
     public LocalDate getProcessDate() { return processDate; }
