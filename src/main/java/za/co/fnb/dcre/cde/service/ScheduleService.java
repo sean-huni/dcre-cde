@@ -4,9 +4,7 @@ import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
 import org.springframework.beans.factory.annotation.Value;
 import org.springframework.stereotype.Service;
-import za.co.fnb.dcre.cde.data.model.CdeScheduleEntity;
 import za.co.fnb.dcre.cde.data.model.ExcludedVerdict;
-import za.co.fnb.dcre.cde.data.model.PassVerdictView;
 import za.co.fnb.dcre.cde.data.model.TxHeaderView;
 import za.co.fnb.dcre.cde.data.repo.CdeScheduleRepo;
 import za.co.fnb.dcre.cde.data.repo.PassVerdictViewRepo;
@@ -15,7 +13,6 @@ import za.co.fnb.dcre.cde.data.repo.TxHeaderViewRepo;
 
 import java.time.LocalDate;
 import java.time.format.DateTimeFormatter;
-import java.util.List;
 import java.util.Set;
 import java.util.UUID;
 
@@ -28,7 +25,8 @@ import java.util.UUID;
  * rule (A-3). The roll passes Sundays and ZA public holidays only, Saturdays
  * valid, and the result must land strictly after the collection date
  * (fail-closed). Fails closed when the holiday calendar has no rows for the
- * collection year. Upserts keyed (arrival_id, sequence): rescheduling is
+ * collection year. Writes are set-based: one INSERT..SELECT covers all PASS
+ * rows (R-41), upsert-keyed (arrival_id, sequence) so rescheduling is
  * idempotent (R-05). Zero PASS rows = valid no-op run (A-7). Every non-PASS
  * verdict is WARN-logged for exclusion visibility (R-38).
  */
@@ -64,12 +62,9 @@ public class ScheduleService {
                 DateTimeFormatter.BASIC_ISO_DATE);
         LocalDate processDate = ProcessDateCalculator.calculate(collection, processingLeadDays,
                 syncedHolidays(collection));
-        List<PassVerdictView> passes = verdicts.findByArrivalIdAndOutcomeOrderBySequence(arrivalId, "PASS");
-        for (PassVerdictView pass : passes) {
-            schedules.upsert(CdeScheduleEntity.of(arrivalId, pass.getSequence(), processDate));
-        }
+        int scheduled = schedules.upsertAllPassRows(arrivalId, processDate);
         warnExcluded(arrivalId);
-        return passes.size();
+        return scheduled;
     }
 
     /** Fail-closed (R-38): an unsynced calendar year must fail the job, never misdate. */

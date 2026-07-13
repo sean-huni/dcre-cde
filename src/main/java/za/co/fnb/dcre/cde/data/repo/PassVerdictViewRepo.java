@@ -11,8 +11,6 @@ import java.util.UUID;
 
 public interface PassVerdictViewRepo extends CrudRepository<PassVerdictView, UUID> {
 
-    List<PassVerdictView> findByArrivalIdAndOutcomeOrderBySequence(UUID arrivalId, String outcome);
-
     /** Non-PASS verdicts joined to the spine for e2e (exclusion WARNs, R-38). */
     @Query(value = """
             SELECT v.sequence, t.e2e, v.outcome

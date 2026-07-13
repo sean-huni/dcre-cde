@@ -6,16 +6,26 @@ import org.springframework.data.repository.CrudRepository;
 import org.springframework.data.repository.query.Param;
 import za.co.fnb.dcre.cde.data.model.CdeScheduleEntity;
 
+import java.time.LocalDate;
 import java.util.UUID;
 
 public interface CdeScheduleRepo extends CrudRepository<CdeScheduleEntity, UUID> {
 
+    /**
+     * R-41 set-based write: schedules every PASS row of the arrival in ONE
+     * INSERT..SELECT, replacing the per-row loop. Upsert stays keyed
+     * (arrival_id, sequence) so a rerun is idempotent (R-05).
+     *
+     * @return number of rows written (inserted or updated).
+     */
     @Modifying
     @Query("""
             INSERT INTO cde_schedule (arrival_id, sequence, process_date)
-            VALUES (:#{#e.arrivalId}, :#{#e.sequence}, :#{#e.processDate})
+            SELECT vl.arrival_id, vl.sequence, :processDate
+            FROM validation_log vl
+            WHERE vl.arrival_id = :arrivalId AND vl.outcome = 'PASS'
             ON CONFLICT (arrival_id, sequence) DO UPDATE SET process_date = EXCLUDED.process_date""")
-    void upsert(@Param("e") CdeScheduleEntity e);
+    int upsertAllPassRows(@Param("arrivalId") UUID arrivalId, @Param("processDate") LocalDate processDate);
 
     long countByArrivalId(UUID arrivalId);
 }

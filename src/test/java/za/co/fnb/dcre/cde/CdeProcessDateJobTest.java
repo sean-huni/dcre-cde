@@ -111,6 +111,19 @@ class CdeProcessDateJobTest {
         }
     }
 
+    @Test
+    void schedulesAllPassRowsInOneStatement() throws Exception {
+        // R-41 set-based write: Mon 2026-07-13 collection + lead 2 = Wed 2026-07-15.
+        UUID arrival = seedArrival("20260713", 500, 3);
+        seedHoliday("2026-12-25");
+
+        JobExecution run = jobOperator.start(cdeJob, params(arrival));
+        assertEquals(BatchStatus.COMPLETED, run.getStatus());
+        assertEquals(500, jdbc.queryForObject(
+                "SELECT count(*) FROM cde_schedule WHERE arrival_id=? AND process_date='2026-07-15'",
+                Integer.class, arrival));
+    }
+
     private UUID seedArrival(String collectionDate, int passCount, int failCount) {
         UUID arrival = UUID.randomUUID();
         jdbc.execute("CREATE TABLE IF NOT EXISTS tx_header (id UUID DEFAULT gen_random_uuid() PRIMARY KEY,"
