@@ -19,7 +19,7 @@ import java.util.UUID;
 import static org.junit.jupiter.api.Assertions.assertEquals;
 
 @SpringBootTest(properties = {"spring.batch.job.enabled=false", "dcre.exchange-root=build/test-exchange",
-        "dcre.cde.offset-days=2"})
+        "dcre.cde.processing-lead-days=2"})
 class CdeJobTest {
 
     static final CockroachContainer CRDB =

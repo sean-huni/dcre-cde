@@ -1,37 +1,40 @@
 @cde
-Feature: CDE schedules the process date for PASS transactions (R-38)
+Feature: CDE schedules the process date for PASS transactions (R-38, 2nd amendment)
 
-  CDE estimates a process date for every PASS transaction of a DC arrival:
-  the collection date is the business date plus the configured offset, then
-  rolled forward one day at a time past Sundays and ZA public holidays.
-  Saturdays are valid process dates. CDE schedules, it never emits (R-37).
+  CDE estimates a process date for every PASS transaction of a DC arrival.
+  The header carries the client-supplied collection date; the processing lead
+  is applied first (candidate = collection date + lead days), then the final
+  adjustment rolls the candidate forward one day at a time past Sundays and
+  ZA public holidays. Saturdays are valid process dates. The lead-then-roll
+  placeholder stands in for the unrecovered collection-cycle rule (A-3,
+  R-35 SYNTHETIC-CONTRACT). CDE schedules, it never emits (R-37).
 
   Background:
-    Given the collection offset is 2 days
+    Given the processing lead is 2 days
     And the ZA public holiday calendar for 2026 is synced
 
-  Scenario: A plain weekday collection date is used unchanged
-    Given a DC arrival with 2 PASS transactions collected on Wednesday 2026-02-18
+  Scenario: Ratified example - the candidate on a plain weekday is used unchanged
+    Given a DC arrival with 2 PASS transactions collected on Monday 2026-07-13
     When the CDE job runs for the arrival
     Then the CDE job completes
-    And every scheduled transaction has process date 2026-02-18
+    And every scheduled transaction has process date 2026-07-15
 
-  Scenario: A Sunday collection date rolls to the Monday
-    Given a DC arrival with 2 PASS transactions collected on Sunday 2026-02-22
+  Scenario: A candidate on a Sunday rolls to the Monday
+    Given a DC arrival with 2 PASS transactions collected on Friday 2026-02-20
     When the CDE job runs for the arrival
     Then the CDE job completes
     And every scheduled transaction has process date 2026-02-23
 
-  Scenario: Ratified example - a holiday Saturday rolls past Sunday and a holiday Monday to Tuesday
+  Scenario: A candidate on a holiday Saturday rolls past Sunday and a holiday Monday to Tuesday
     Given 2026-02-14 is a ZA public holiday
     And 2026-02-16 is a ZA public holiday
-    And a DC arrival with 3 PASS transactions collected on Saturday 2026-02-14
+    And a DC arrival with 3 PASS transactions collected on Thursday 2026-02-12
     When the CDE job runs for the arrival
     Then the CDE job completes
     And every scheduled transaction has process date 2026-02-17
 
-  Scenario: A plain Saturday stands as a valid process date
-    Given a DC arrival with 2 PASS transactions collected on Saturday 2026-02-21
+  Scenario: A candidate on a plain Saturday stands as a valid process date
+    Given a DC arrival with 2 PASS transactions collected on Thursday 2026-02-19
     When the CDE job runs for the arrival
     Then the CDE job completes
     And every scheduled transaction has process date 2026-02-21
@@ -44,20 +47,20 @@ Feature: CDE schedules the process date for PASS transactions (R-38)
     And no transactions are scheduled for the arrival
 
   Scenario: Rescheduling the same arrival is idempotent
-    Given a DC arrival with 4 PASS transactions collected on Wednesday 2026-02-18
+    Given a DC arrival with 4 PASS transactions collected on Monday 2026-07-13
     When the CDE job runs for the arrival
     And the CDE job runs again for the arrival
     Then the CDE job completes
     And exactly 4 transactions are scheduled for the arrival
 
   Scenario: An arrival with zero PASS transactions completes as a valid no-op
-    Given a DC arrival with 0 PASS transactions and 2 failed transactions collected on Wednesday 2026-02-18
+    Given a DC arrival with 0 PASS transactions and 2 failed transactions collected on Monday 2026-07-13
     When the CDE job runs for the arrival
     Then the CDE job completes
     And no transactions are scheduled for the arrival
 
   Scenario: Every excluded non-PASS verdict is logged as a WARN
-    Given a DC arrival with 2 PASS transactions and 3 failed transactions collected on Wednesday 2026-02-18
+    Given a DC arrival with 2 PASS transactions and 3 failed transactions collected on Monday 2026-07-13
     When the CDE job runs for the arrival
     Then the CDE job completes
     And exactly 2 transactions are scheduled for the arrival

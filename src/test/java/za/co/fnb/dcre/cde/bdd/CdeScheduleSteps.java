@@ -40,8 +40,8 @@ public class CdeScheduleSteps {
     @Autowired
     JdbcTemplate jdbc;
 
-    @Value("${dcre.cde.offset-days}")
-    int offsetDays;
+    @Value("${dcre.cde.processing-lead-days}")
+    int processingLeadDays;
 
     private UUID arrival;
     private JobExecution lastExecution;
@@ -68,9 +68,10 @@ public class CdeScheduleSteps {
         serviceLogger.detachAppender(warnAppender);
     }
 
-    @Given("the collection offset is {int} days")
-    public void theCollectionOffsetIs(int days) {
-        assertEquals(days, offsetDays, "scenario offset must match the context's dcre.cde.offset-days");
+    @Given("the processing lead is {int} days")
+    public void theProcessingLeadIs(int days) {
+        assertEquals(days, processingLeadDays,
+                "scenario lead must match the context's dcre.cde.processing-lead-days");
     }
 
     @Given("the ZA public holiday calendar for {int} is synced")
@@ -167,12 +168,11 @@ public class CdeScheduleSteps {
                 Integer.class, arrival);
     }
 
-    /** Collection_Date = business_date + offset, so seed business_date = collection - offset. */
+    /** The header date IS the client-supplied collection date (R-38 2nd amendment). */
     private void seedArrival(String collectionDate, int passCount, int failCount) {
         arrival = UUID.randomUUID();
-        String businessDate = LocalDate.parse(collectionDate).minusDays(offsetDays)
-                .format(DateTimeFormatter.BASIC_ISO_DATE);
-        jdbc.update("UPSERT INTO tx_header (arrival_id, business_date) VALUES (?,?)", arrival, businessDate);
+        String headerDate = LocalDate.parse(collectionDate).format(DateTimeFormatter.BASIC_ISO_DATE);
+        jdbc.update("UPSERT INTO tx_header (arrival_id, business_date) VALUES (?,?)", arrival, headerDate);
         for (int i = 1; i <= passCount + failCount; i++) {
             jdbc.update("UPSERT INTO validation_log (arrival_id, sequence, outcome) VALUES (?,?,?)",
                     arrival, i, i <= passCount ? "PASS" : "FAIL_ACCOUNT_NOT_FOUND");

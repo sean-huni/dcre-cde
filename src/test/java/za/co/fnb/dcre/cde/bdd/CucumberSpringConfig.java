@@ -10,12 +10,12 @@ import org.testcontainers.utility.DockerImageName;
 /**
  * One Spring context for all @cde scenarios, bootstrapped exactly like the
  * existing JUnit tests (CdeJobTest): real CockroachDB via Testcontainers,
- * Liquibase-managed schema, scheduler disabled, offset 2 so the BDD scenarios
- * exercise the documented Collection_Date = business_date + offset semantics.
+ * Liquibase-managed schema, scheduler disabled, processing lead 2 so the BDD
+ * scenarios exercise the R-38 2nd-amendment lead-then-roll placeholder.
  */
 @CucumberContextConfiguration
 @SpringBootTest(properties = {"spring.batch.job.enabled=false", "dcre.exchange-root=build/test-exchange",
-        "dcre.cde.offset-days=2"})
+        "dcre.cde.processing-lead-days=2"})
 public class CucumberSpringConfig {
 
     static final CockroachContainer CRDB =

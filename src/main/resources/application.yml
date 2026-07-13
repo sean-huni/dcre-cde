@@ -21,7 +21,9 @@ dcre:
   flow-dc: ${DCRE_FLOW_DC:true}
 
   cde:
-    # dev default 0 = due today (unit tests prove warehousing); prod overrides via env
-    offset-days: ${DCRE_CDE_OFFSET_DAYS:0}
+    # R-38 2nd amendment: candidate = collection date + lead, then the final roll.
+    # Lead-then-roll is the R-35 SYNTHETIC-CONTRACT placeholder for the unrecovered
+    # collection-cycle rule (A-3); must be >= 1 so process date follows collection date.
+    processing-lead-days: ${DCRE_CDE_PROCESSING_LEAD_DAYS:2}
     # Holiday-calendar country for the R-38 roll (public_holiday is synced by dcre-hcs)
     country: ${DCRE_CDE_COUNTRY:ZA}

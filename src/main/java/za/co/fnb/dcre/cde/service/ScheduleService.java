@@ -21,13 +21,16 @@ import java.util.UUID;
 
 /**
  * Business tier: estimates and persists process_date per PASS transaction
- * (R-37: CDE schedules, never emits). Collection_Date = business_date +
- * offset-days (offset semantics remain the A-3 residual); Process_Date =
- * Collection_Date rolled per R-38 (roll rule resolved: past Sundays and ZA
- * public holidays, Saturdays valid). Fails closed when the holiday calendar
- * has no rows for the collection year. Upserts keyed (arrival_id, sequence):
- * rescheduling is idempotent (R-05). Zero PASS rows = valid no-op run (A-7).
- * Every non-PASS verdict is WARN-logged for exclusion visibility (R-38).
+ * (R-37: CDE schedules, never emits). The header carries the client-supplied
+ * collection date (R-38 2nd amendment); Process_Date = candidate rolled per
+ * R-38 where candidate = collection date + processing-lead-days, the
+ * SYNTHETIC-CONTRACT placeholder (R-35) for the unrecovered collection-cycle
+ * rule (A-3). The roll passes Sundays and ZA public holidays only, Saturdays
+ * valid, and the result must land strictly after the collection date
+ * (fail-closed). Fails closed when the holiday calendar has no rows for the
+ * collection year. Upserts keyed (arrival_id, sequence): rescheduling is
+ * idempotent (R-05). Zero PASS rows = valid no-op run (A-7). Every non-PASS
+ * verdict is WARN-logged for exclusion visibility (R-38).
  */
 @Service
 public class ScheduleService {
@@ -39,27 +42,28 @@ public class ScheduleService {
     private final PassVerdictViewRepo verdicts;
     private final CdeScheduleRepo schedules;
     private final PublicHolidayViewRepo holidays;
-    private final int offsetDays;
+    private final int processingLeadDays;
     private final String country;
 
     public ScheduleService(TxHeaderViewRepo headers, PassVerdictViewRepo verdicts,
                            CdeScheduleRepo schedules, PublicHolidayViewRepo holidays,
-                           @Value("${dcre.cde.offset-days:2}") int offsetDays,
+                           @Value("${dcre.cde.processing-lead-days:2}") int processingLeadDays,
                            @Value("${dcre.cde.country:ZA}") String country) {
         this.headers = headers;
         this.verdicts = verdicts;
         this.schedules = schedules;
         this.holidays = holidays;
-        this.offsetDays = offsetDays;
+        this.processingLeadDays = processingLeadDays;
         this.country = country;
     }
 
     /** @return number of transactions scheduled. */
     public int schedule(UUID arrivalId) {
         TxHeaderView header = headers.findByArrivalId(arrivalId).orElseThrow();
-        LocalDate collection = LocalDate.parse(header.getBusinessDate().strip(),
-                DateTimeFormatter.BASIC_ISO_DATE).plusDays(offsetDays);
-        LocalDate processDate = ProcessDateCalculator.roll(collection, syncedHolidays(collection));
+        LocalDate collection = LocalDate.parse(header.getCollectionDate().strip(),
+                DateTimeFormatter.BASIC_ISO_DATE);
+        LocalDate processDate = ProcessDateCalculator.calculate(collection, processingLeadDays,
+                syncedHolidays(collection));
         List<PassVerdictView> passes = verdicts.findByArrivalIdAndOutcomeOrderBySequence(arrivalId, "PASS");
         for (PassVerdictView pass : passes) {
             schedules.upsert(CdeScheduleEntity.of(arrivalId, pass.getSequence(), processDate));

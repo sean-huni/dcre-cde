@@ -1,6 +1,6 @@
 # dcre-cde
 
-Collection Day Estimator (R-37: schedules only, never emits). PASS verdicts + `tx_header.business_date` + offset-days -> `cde_schedule` upsert keyed (arrival_id, sequence). 3-tier: ScheduleTasklet -> ScheduleService -> data/repo. SYNTHETIC-CONTRACT date rule (A-3 residual). Since SCRUM-37 the schedule applies the R-38 process-date roll against a fail-closed holiday calendar and WARN-logs every excluded verdict.
+Collection Day Estimator (R-37: schedules only, never emits). PASS verdicts + client-supplied collection date + processing lead -> `cde_schedule` upsert keyed (arrival_id, sequence). 3-tier: ScheduleTasklet -> ScheduleService -> data/repo. SYNTHETIC-CONTRACT date rule (A-3, cycle rule unrecovered). Since SCRUM-37 the schedule applies the R-38 process-date roll against a fail-closed holiday calendar and WARN-logs every excluded verdict; since the R-38 2nd amendment (2026-07-13) the lead is applied before the roll and the result must follow the collection date.
 
 ## Pipeline position
 
@@ -10,8 +10,8 @@ Per-file DAG stage in the Collections DAG (SPEC-DAG-PIPELINE): downstream of CTV
 
 `cdeJob` = single tasklet step `scheduleStep`: `ScheduleTasklet` (thin entry adapter) -> `ScheduleService` (business tier) -> `data/repo`. Identifying JobParameter: `arrival.id` (UUID string); the count of scheduled transactions lands in the execution context as `scheduled`.
 
-- Collection_Date = `tx_header.business_date` + `dcre.cde.offset-days` (offset semantics remain the A-3 residual, [SYNTHETIC-CONTRACT]).
-- Process_Date = Collection_Date rolled per R-38 (`ProcessDateCalculator`, pure, no I/O): roll forward one day at a time while the date is a Sunday or a ZA public holiday. Saturdays are valid process dates (Sean-ruled 2026-07-12): the historical "next available weekday" phrasing is loose wording, not a Mon-Fri constraint.
+- Collection_Date is client-supplied in the header (R-38 2nd amendment); the physical column is still `tx_header.business_date` (CRR-side rename is registered code debt).
+- Process_Date = roll(Collection_Date + `dcre.cde.processing-lead-days`) per R-38 as amended (`ProcessDateCalculator`, pure, no I/O): the lead is applied first ([SYNTHETIC-CONTRACT] placeholder for the unrecovered collection-cycle rule, A-3), then the final adjustment rolls forward one day at a time while the date is a Sunday or a ZA public holiday. Saturdays are valid process dates (Sean-ruled 2026-07-12). The result must land strictly after Collection_Date; a violating lead fails the job closed.
 - Fail-closed calendar (R-38): if `public_holiday` has zero synced rows for the collection year the job throws and FAILS; it never misdates. Holiday lookup horizon: 60 days past the collection date.
 - One `cde_schedule` row per PASS verdict, upserted `ON CONFLICT (arrival_id, sequence) DO UPDATE` (rescheduling is idempotent, R-05). Zero PASS rows = valid no-op run (A-7).
 - R-38 exclusion visibility: one WARN per non-PASS verdict (joined to `tx_entry` for the e2e), shape `excluded stage=CDE arrival=<id> seq=<n> e2e=<e2e> reason=CTV_<OUTCOME>`.
@@ -48,7 +48,7 @@ Both resolve from Maven Local only (no remote repository): run `./gradlew publis
 | `DCRE_DB_URL` | `jdbc:postgresql://localhost:26257/dcre_collections?sslmode=disable` | shared CockroachDB |
 | `DCRE_DB_USER` / `DCRE_DB_PASSWORD` | `root` / empty | DB credentials |
 | `DCRE_EXCHANGE_ROOT` | `../../infra/dcre-infra/exchange` | outcome seam directory |
-| `DCRE_CDE_OFFSET_DAYS` | `0` (dev: due today; prod overrides) | Collection_Date offset (A-3 residual) |
+| `DCRE_CDE_PROCESSING_LEAD_DAYS` | `2` (must be >= 1) | processing lead before the R-38 roll (A-3 placeholder) |
 | `DCRE_CDE_COUNTRY` | `ZA` | holiday-calendar country for the R-38 roll |
 | `JOB_NAME` | `local-<executionId>` | outcome seam file name (set by AGT) |
 
@@ -58,9 +58,10 @@ Both resolve from Maven Local only (no remote repository): run `./gradlew publis
 
 Spring Boot 4.1.0, Java 25 toolchain; platform libs resolve from mavenLocal (see Local module dependencies). `./gradlew test` (Docker required):
 
-- `CdeJobTest`: Testcontainers CockroachDB v26.2.3; 30 verdicts (15 PASS) -> exactly 15 schedule rows with the offset-and-rolled process date; rerun leaves 15 (idempotent reschedule, R-05).
-- `CdeProcessDateJobTest`: rolls past a holiday-Saturday/Sunday/holiday-Monday chain, fails closed on an unsynced calendar year, one WARN per excluded non-PASS verdict.
-- `ProcessDateCalculatorTest`: pure roll-rule cases (plain Saturday stands, Sunday rolls to Monday, plain weekday unchanged).
+- `CdeJobTest`: Testcontainers CockroachDB v26.2.3; 30 verdicts (15 PASS) -> exactly 15 schedule rows with the lead-and-rolled process date; rerun leaves 15 (idempotent reschedule, R-05).
+- `CdeProcessDateJobTest`: rolls a candidate landing on a holiday Monday, fails closed on an unsynced calendar year, one WARN per excluded non-PASS verdict.
+- `ProcessDateCalculatorTest`: lead-then-roll cases (ratified 2026-07-13 -> 2026-07-15 example, Sunday/holiday candidates roll, plain Saturday candidate stands, fail-closed when the process date would not follow the collection date) plus the pure roll-only cases.
+- `CucumberSuiteTest` (`features/cde-process-date.feature`, tag `@cde`): BDD scenarios for stays-as-is vs rolled process dates, fail-closed calendar, idempotent reschedule, no-op runs and exclusion WARNs.
 
 ## Run
 
