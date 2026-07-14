@@ -15,6 +15,7 @@ import org.springframework.context.annotation.Configuration;
 import org.springframework.core.annotation.Order;
 import org.springframework.transaction.PlatformTransactionManager;
 import za.co.fnb.dcre.cde.service.ScheduleTasklet;
+import za.co.fnb.dcre.platform.batch.CrdbRetryExceptionHandler;
 import za.co.fnb.dcre.platform.batch.OutcomeFileWriter;
 import za.co.fnb.dcre.platform.batch.StaleExecutionSweeper;
 
@@ -24,10 +25,24 @@ import java.nio.file.Path;
 @Configuration
 public class CdeJobConfig {
 
+    /**
+     * CRDB 40001 retry for the WRITE step (set-based schedule upsert), the
+     * observed RETRY_SERIALIZABLE death under 3-way copybook concurrency
+     * (exit 5, TECH_FAILED). Commit-time aborts are covered because the
+     * tasklet commit runs inside the step's repeat loop; the re-run redoes
+     * the whole tasklet in a fresh transaction (shared platform handler,
+     * proven live in CTV). Retry, never skip.
+     */
+    private final CrdbRetryExceptionHandler crdbRetry = new CrdbRetryExceptionHandler("CDE");
+
     @Bean
-    public Job cdeJob(JobRepository repo, PlatformTransactionManager tx, ScheduleTasklet tasklet,
+    public Step scheduleStep(JobRepository repo, PlatformTransactionManager tx, ScheduleTasklet tasklet) {
+        return new StepBuilder("scheduleStep", repo).tasklet(tasklet, tx).exceptionHandler(crdbRetry).build();
+    }
+
+    @Bean
+    public Job cdeJob(JobRepository repo, Step scheduleStep,
                       @Value("${dcre.exchange-root}") String exchangeRoot) {
-        Step scheduleStep = new StepBuilder("scheduleStep", repo).tasklet(tasklet, tx).build();
         return new JobBuilder("cdeJob", repo)
                 .listener(new SeamListener(exchangeRoot))
                 .start(scheduleStep)
