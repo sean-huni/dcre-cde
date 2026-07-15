@@ -40,7 +40,7 @@ Clean clone, no `.env` needed (committed defaults target the local CockroachDB a
 ```bash
 ./gradlew test                                   # full suite, Docker required
 ./gradlew bootJar                                # build/libs/cde-2.0.jar
-java -jar build/libs/cde-2.0.jar arrival.id=<uuid>
+java -jar build/libs/cde-2.0.jar 'arrival.id=<uuid>'
 ```
 
 `arrival.id` (UUID string) is the identifying job parameter; the count of scheduled transactions lands in the execution context as `scheduled`. The JVM exit code carries the Batch outcome (R-34).
