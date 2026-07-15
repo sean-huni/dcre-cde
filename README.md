@@ -1,72 +1,99 @@
 # dcre-cde
 
-Collection Day Estimator (R-37: schedules only, never emits). PASS verdicts + client-supplied collection date + processing lead -> `cde_schedule` upsert keyed (arrival_id, sequence). 3-tier: ScheduleTasklet -> ScheduleService -> data/repo. SYNTHETIC-CONTRACT date rule (A-3, cycle rule unrecovered). Since SCRUM-37 the schedule applies the R-38 process-date roll against a fail-closed holiday calendar and WARN-logs every excluded verdict; since the R-38 2nd amendment (2026-07-13) the lead is applied before the roll and the result must follow the collection date.
+Collection Day Estimator: mints `cde_schedule` rows (process dates) for CTV-passing transactions of a DC arrival; schedules only, never emits (R-37).
 
-## Pipeline position
+## What it does
 
-Per-file DAG stage in the Collections DAG (SPEC-DAG-PIPELINE): downstream of CTV in the fork `CTV -> { CDE || CIR }` (via AIS on ENDO); CDE's own downstream is CRW, the Process-Date Executor that emits what CDE scheduled. Launched by AGT as an ephemeral Kubernetes Job per arrival; DB-only stage, no file I/O (R-30).
+Per-file DAG stage downstream of CTV in the fork `CTV -> { CDE || CIR }`; CDE's own downstream is CRW, which emits what CDE scheduled. For each PASS verdict of the arrival, Process_Date = roll(client-supplied Collection_Date + processing lead) per R-38 (2nd amendment): the lead is applied first, then the candidate rolls forward one day at a time while it is a Sunday or a ZA public holiday (Saturdays are valid). The calendar is fail-closed: zero synced `public_holiday` rows for the collection year fails the job; CDE never misdates. AGT launches it as a short-lived Kubernetes Job per arrival; it is a DB-only stage with no file I/O (R-30) apart from the outcome seam file. Stack: Java 25, Spring Boot 4.1.0 (Spring Batch, Spring Data JDBC), Liquibase, CockroachDB.
 
-## Job structure and key rules
+## Architecture and principles
 
-`cdeJob` = single tasklet step `scheduleStep`: `ScheduleTasklet` (thin entry adapter) -> `ScheduleService` (business tier) -> `data/repo`. Identifying JobParameter: `arrival.id` (UUID string); the count of scheduled transactions lands in the execution context as `scheduled`.
+- **SOLID, 3-tier**: `cdeJob` is a single tasklet step `scheduleStep`. `ScheduleTasklet` is a thin entry adapter (extracts the identifying `arrival.id` job parameter, calls one service method); business logic lives in `ScheduleService`; `ProcessDateCalculator` is a pure function (no I/O); persistence goes only through `data/repo` interfaces. Layer-first packages: `config/`, `service/`, `data/model/`, `data/repo/`.
+- **12FactorApp Alignment - https://12factor.net/**: config strictly from the environment with committed working dev defaults (a clean clone runs with no `.env`), stateless one-shot process, the shared CockroachDB as an attached resource, dev/prod parity via the same image locally and in kind.
+- **Idempotent restart semantics**: the schedule write is one set-based `INSERT..SELECT` over all PASS rows (R-41), upserted `ON CONFLICT (arrival_id, sequence) DO UPDATE` (full business identity), so rescheduling and same-identity relaunch are no-ops that never duplicate rows (R-05). Zero PASS rows is a valid no-op run (A-7). Spring Batch metadata lives under the `CDE_BATCH_` prefix; an `@Order(-10)` ApplicationRunner runs `StaleExecutionSweeper.abandonStale(ds, "CDE_BATCH_", 60)` so a killed pod cannot strand the relaunch (A-39a). The write step carries the shared `CrdbRetryExceptionHandler` (CRDB 40001 serialization aborts retry, never skip). Kill-resume is chaos-validated fleet-wide (SIGKILL at every stage, same-identity relaunch, zero duplicates); in this repo the rerun invariants are pinned by `CdeJobTest` and `CdeScheduleRepoIT`.
+- **Outcome seam**: `afterJob` on COMPLETED writes `BUSINESS_ACCEPTED` to `<exchange-root>/outcomes/<JOB_NAME>` (staged, atomic). Technical death writes nothing: the R-34 exit code (`ExitCodeMain`) and the K8s Job condition are the witnesses; AGT treats absence as never-success (R-33).
+- **Exclusion visibility (R-38)**: one WARN per non-PASS verdict, shape `excluded stage=CDE arrival=<id> seq=<n> e2e=<e2e> reason=CTV_<OUTCOME>`.
 
-- Collection_Date is client-supplied in the header (R-38 2nd amendment); the physical column is still `tx_header.business_date` (CRR-side rename is registered code debt).
-- Process_Date = roll(Collection_Date + `dcre.cde.processing-lead-days`) per R-38 as amended (`ProcessDateCalculator`, pure, no I/O): the lead is applied first ([SYNTHETIC-CONTRACT] placeholder for the unrecovered collection-cycle rule, A-3), then the final adjustment rolls forward one day at a time while the date is a Sunday or a ZA public holiday. Saturdays are valid process dates (Sean-ruled 2026-07-12). The result must land strictly after Collection_Date; a violating lead fails the job closed.
-- Fail-closed calendar (R-38): if `public_holiday` has zero synced rows for the collection year the job throws and FAILS; it never misdates. Holiday lookup horizon: 60 days past the collection date.
-- One `cde_schedule` row per PASS verdict, upserted `ON CONFLICT (arrival_id, sequence) DO UPDATE` (rescheduling is idempotent, R-05). Zero PASS rows = valid no-op run (A-7).
-- R-38 exclusion visibility: one WARN per non-PASS verdict (joined to `tx_entry` for the e2e), shape `excluded stage=CDE arrival=<id> seq=<n> e2e=<e2e> reason=CTV_<OUTCOME>`.
+### Data
 
-## Outcome seam
+Reads (grants-based, R-04/R-06): `tx_header` (CRR-owned; the header's `business_date` column carries the client-supplied collection date), `validation_log` (CTV verdicts), `public_holiday` (HCS-owned, read-only; lookup horizon 60 days past the collection date). Writes: `cde_schedule` (CDE single writer, UNIQUE(arrival_id, sequence)).
 
-`afterJob` on COMPLETED writes `BUSINESS_ACCEPTED` to `<exchange-root>/outcomes/<JOB_NAME>` (staged, atomic); CDE produces no business-partial verdicts of its own. Technical death writes nothing: the R-34 exit code (`ExitCodeMain`) and the K8s condition are the witnesses; AGT treats absence as never-success (R-33).
+Liquibase (per-service history tables `cde_databasechangelog` / `cde_databasechangeloglock` on the shared DB): 001 `cde_schedule`, 002 `CDE_BATCH_` metadata DDL, plus a BOOTSTRAP-ORDER GUARD that creates `public_holiday` IF NOT EXISTS with the owner's exact column set: HCS owns the table, but CDE runs per arrival and may start before HCS's first clock window on a fresh DB.
 
-## Data
+## Prerequisites
 
-Reads (grants-based, R-04/R-06): `tx_header` (CRR), `validation_log` (CTV verdicts), `public_holiday` (HCS-owned, read-only). Writes: `cde_schedule` (CDE single writer, R-04; UNIQUE(arrival_id, sequence)).
+- JDK 25 (Gradle toolchain; wrapper is Gradle 9.5.1)
+- Docker (Testcontainers CockroachDB and the image build)
+- Platform libs in Maven Local (no remote repository):
 
-Liquibase: per-service history tables `cde_databasechangelog` / `cde_databasechangeloglock` (shared DB). Changesets: 001 `cde_schedule`, 002 CDE_BATCH_ metadata DDL, plus a BOOTSTRAP-ORDER GUARD that creates `public_holiday` IF NOT EXISTS with the owner's exact column set: HCS owns the table (single writer, R-04) but CDE is launched per arrival and may run before HCS's first 6 h clock window on a fresh DB.
+| Module | Version | Used for |
+|---|---|---|
+| `za.co.fnb.dcre:platform-persistence` | 0.1.0 | `BaseEntity`, `JdbcConfig` (imported by `CdeApplication`) |
+| `za.co.fnb.dcre:platform-batch` | 0.1.0 | `ExitCodeMain`, `OutcomeFileWriter`, `StaleExecutionSweeper`, `CrdbRetryExceptionHandler` |
 
-## Batch metadata
+Publish chain: `./gradlew publishToMavenLocal` in `dcre-platform-model` -> `dcre-platform-files` -> `dcre-platform-batch` (batch brings files and model transitively); `dcre-platform-persistence` is standalone.
 
-Spring Batch tables under the `CDE_BATCH_` prefix, `initialize-schema: never` (Liquibase owns the DDL). A-39a self-abandonment: an `@Order(-10)` ApplicationRunner runs `StaleExecutionSweeper.abandonStale(ds, "CDE_BATCH_", 60)` before the job launches, abandoning STARTED executions older than 60 s so a killed pod cannot strand the relaunch.
+## Quickstart
 
-## Local module dependencies
+Clean clone, no `.env` needed (committed defaults target the local CockroachDB at `localhost:26257`, e.g. the kind CRDB port-forwarded via dcre-infra `scripts/crdb-forward.sh`):
 
-| Module | Version | Scope | Used for |
-|---|---|---|---|
-| `dcre-platform-persistence` | 0.1.0 | `implementation` | `BaseEntity` (version/created_at/updated_at on `CdeScheduleEntity`), `JdbcConfig` (Spring Data JDBC base config, imported by `CdeApplication`) |
-| `dcre-platform-batch` | 0.1.0 | `implementation` | `ExitCodeMain` (R-34 exit-code wiring), `OutcomeFileWriter` (outcome seam), `StaleExecutionSweeper` (A-39a self-abandonment) |
+```bash
+./gradlew test                                   # full suite, Docker required
+./gradlew bootJar                                # build/libs/cde-2.0.jar
+java -jar build/libs/cde-2.0.jar arrival.id=<uuid>
+```
 
-Both resolve from Maven Local only (no remote repository): run `./gradlew publishToMavenLocal` in each dependency repo first, publish chain `dcre-platform-model` -> `dcre-platform-files` -> `dcre-platform-batch` (batch brings files and model transitively via its `api` chain); `dcre-platform-persistence` is standalone. Details in each module repo's README under "Publishing".
+`arrival.id` (UUID string) is the identifying job parameter; the count of scheduled transactions lands in the execution context as `scheduled`. The JVM exit code carries the Batch outcome (R-34).
 
 ## Configuration
 
-12FactorApp Alignment (https://12factor.net/): committed working dev defaults, env overrides; a clean clone runs with no `.env`.
+Precedence: yml default < environment variable.
 
-| Env var | Default | Used for |
+| Env var | Default | Purpose |
 |---|---|---|
 | `DCRE_DB_URL` | `jdbc:postgresql://localhost:26257/dcre_collections?sslmode=disable` | shared CockroachDB |
-| `DCRE_DB_USER` / `DCRE_DB_PASSWORD` | `root` / empty | DB credentials |
-| `DCRE_EXCHANGE_ROOT` | `../../infra/dcre-infra/exchange` | outcome seam directory |
-| `DCRE_CDE_PROCESSING_LEAD_DAYS` | `2` (must be >= 1) | processing lead before the R-38 roll (A-3 placeholder) |
+| `DCRE_DB_USER` | `root` | DB user |
+| `DCRE_DB_PASSWORD` | (empty) | DB password |
+| `DCRE_EXCHANGE_ROOT` | `../../../../../infra/dcre-infra/exchange` | outcome seam directory (resolves to dcre-infra's `exchange/` in the canonical fleet checkout; deployed contexts set an absolute path) |
+| `DCRE_CDE_PROCESSING_LEAD_DAYS` | `2` (must be >= 1) | processing lead applied before the R-38 roll (SYNTHETIC-CONTRACT placeholder for the unrecovered collection-cycle rule, A-3) |
 | `DCRE_CDE_COUNTRY` | `ZA` | holiday-calendar country for the R-38 roll |
 | `JOB_NAME` | `local-<executionId>` | outcome seam file name (set by AGT) |
 
-`DCRE_AMOUNT_SCALE`, `DCRE_V1_ENABLED` and `DCRE_FLOW_DC` sit in the shared config block but are not consumed by CDE code.
+`DCRE_AMOUNT_SCALE` (`2`), `DCRE_V1_ENABLED` (`false`) and `DCRE_FLOW_DC` (`true`) sit in the shared fleet config block but are not read by CDE code.
 
-## Build & test
+## Testing
 
-Spring Boot 4.1.0, Java 25 toolchain; platform libs resolve from mavenLocal (see Local module dependencies). `./gradlew test` (Docker required):
+```bash
+./gradlew test                                                              # Docker required
+./gradlew test --tests 'za.co.fnb.dcre.cde.service.ProcessDateCalculatorTest'   # pure unit slice
+```
 
-- `CdeJobTest`: Testcontainers CockroachDB v26.2.3; 30 verdicts (15 PASS) -> exactly 15 schedule rows with the lead-and-rolled process date; rerun leaves 15 (idempotent reschedule, R-05).
-- `CdeProcessDateJobTest`: rolls a candidate landing on a holiday Monday, fails closed on an unsynced calendar year, one WARN per excluded non-PASS verdict.
-- `ProcessDateCalculatorTest`: lead-then-roll cases (ratified 2026-07-13 -> 2026-07-15 example, Sunday/holiday candidates roll, plain Saturday candidate stands, fail-closed when the process date would not follow the collection date) plus the pure roll-only cases.
-- `CucumberSuiteTest` (`features/cde-process-date.feature`, tag `@cde`): BDD scenarios for stays-as-is vs rolled process dates, fail-closed calendar, idempotent reschedule, no-op runs and exclusion WARNs.
+- `ProcessDateCalculatorTest`: lead-then-roll cases (ratified 2026-07-13 -> 2026-07-15 example, Sunday/holiday candidates roll, plain Saturday stands, fail-closed when the process date would not follow the collection date) plus the pure roll-only cases.
+- `CdeJobTest` (Testcontainers `cockroachdb/cockroach:v26.2.3`): 30 verdicts (15 PASS) -> exactly 15 schedule rows with the lead-and-rolled process date; rerun leaves 15 (idempotent reschedule, R-05).
+- `CdeProcessDateJobTest`: rolls past a holiday Saturday + Sunday + holiday Monday, fails closed on an unsynced calendar year, one WARN per excluded non-PASS verdict, all PASS rows written in one statement (R-41).
+- `CdeScheduleRepoIT`: upsert writes only PASS rows and returns the count, rerun updates the process date without duplicating rows, zero PASS rows is a valid no-op.
+- `CdeJobConfigRetryTest`: `scheduleStep` retries commit-time CRDB 40001 serialization aborts.
+- `CucumberSuiteTest` (`features/cde-process-date.feature`, tag `@cde`): BDD scenarios for unchanged vs rolled process dates, fail-closed calendar, idempotent reschedule, no-op runs and exclusion WARNs.
 
-## Run
+## Local cluster deployment
 
-`./gradlew build && docker build -t dcre-cde:0.1.0 .` (eclipse-temurin:25-jre-alpine). In the cluster AGT launches it as a Job with `JOB_NAME` and the identifying `arrival.id=<uuid>` job parameter; locally: `java -jar build/libs/dcre-cde-0.1.0.jar arrival.id=<uuid>` against the dcre-infra compose stack. The JVM exit code carries the Batch outcome (R-34).
+Cluster and DB come from dcre-infra (`scripts/kind-up.sh` creates the kind cluster `dcre-dev`):
 
-## Observability
+```bash
+VERSION=2.1.0   # any fleet release tag accepted by dcre-infra scripts/switch-version.sh
+./gradlew bootJar
+docker build -t dcre-cde:$VERSION .              # eclipse-temurin:25-jre-alpine
+kind load docker-image --name dcre-dev dcre-cde:$VERSION
+```
 
-No metrics wired yet. Operational signals: structured R-38 exclusion WARNs (`excluded stage=CDE ...`), the fail-closed calendar failure, the outcome seam file, and the R-34 exit code observed by AGT.
+Then from dcre-infra, `scripts/switch-version.sh $VERSION` points the fleet at the tag (it sets `AGT_CDE_IMAGE=dcre-cde:$VERSION` on the AGT deployment). AGT mints one Kubernetes Job per arrival from that image, passing `JOB_NAME` and the identifying `arrival.id=<uuid>` job parameter. Releases are digits-only 3-component SemVer git tags, uniform across the fleet (this repo: `1.0.0` through `2.1.1`).
+
+## Related repositories
+
+- Orchestrator: [dcre-agt](https://github.com/sean-huni/dcre-agt)
+- Upstream stage: [dcre-ctv](https://github.com/sean-huni/dcre-ctv) (verdicts CDE consumes); [dcre-crr](https://github.com/sean-huni/dcre-crr) (headers)
+- Downstream stage: [dcre-crw](https://github.com/sean-huni/dcre-crw) (emits what CDE scheduled)
+- Calendar owner: [dcre-hcs](https://github.com/sean-huni/dcre-hcs) (`public_holiday` sync)
+- Other stages: [dcre-cir](https://github.com/sean-huni/dcre-cir), [dcre-ixr](https://github.com/sean-huni/dcre-ixr), [dcre-sxr](https://github.com/sean-huni/dcre-sxr), [dcre-pxr](https://github.com/sean-huni/dcre-pxr), [dcre-prg](https://github.com/sean-huni/dcre-prg), [dcre-ais](https://github.com/sean-huni/dcre-ais)
+- Platform libs: [dcre-platform-model](https://github.com/sean-huni/dcre-platform-model), [dcre-platform-files](https://github.com/sean-huni/dcre-platform-files), [dcre-platform-batch](https://github.com/sean-huni/dcre-platform-batch), [dcre-platform-persistence](https://github.com/sean-huni/dcre-platform-persistence)
+- Environment and tooling: [dcre-infra](https://github.com/sean-huni/dcre-infra), [dcre-fixture-toolkit](https://github.com/sean-huni/dcre-fixture-toolkit), [dcre-design-register](https://github.com/sean-huni/dcre-design-register), [dcre-rpt](https://github.com/sean-huni/dcre-rpt)
