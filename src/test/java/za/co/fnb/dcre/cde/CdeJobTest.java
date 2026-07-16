@@ -14,9 +14,12 @@ import org.springframework.test.context.DynamicPropertySource;
 import org.testcontainers.containers.CockroachContainer;
 import org.testcontainers.utility.DockerImageName;
 
+import java.nio.file.Files;
+import java.nio.file.Path;
 import java.util.UUID;
 
 import static org.junit.jupiter.api.Assertions.assertEquals;
+import static org.junit.jupiter.api.Assertions.assertTrue;
 
 @SpringBootTest(properties = {"spring.batch.job.enabled=false", "dcre.exchange-root=build/test-exchange",
         "dcre.cde.processing-lead-days=2"})
@@ -66,6 +69,9 @@ class CdeJobTest {
         JobExecution run = jobOperator.start(cdeJob, new JobParametersBuilder()
                 .addString("arrival.id", arrival.toString(), true).toJobParameters());
         assertEquals(BatchStatus.COMPLETED, run.getStatus());
+        // SCRUM-58: without JOB_NAME env the seam name is the self-describing local fallback.
+        assertTrue(Files.exists(Path.of("build/test-exchange/outcomes/local-cde-" + run.getId())),
+                "outcome seam file local-cde-<executionId> (SCRUM-58 self-describing local seam name)");
         assertEquals(15, jdbc.queryForObject(
                 "SELECT count(*) FROM cde_schedule WHERE arrival_id=?", Integer.class, arrival));
         assertEquals("2026-07-13", jdbc.queryForObject(
