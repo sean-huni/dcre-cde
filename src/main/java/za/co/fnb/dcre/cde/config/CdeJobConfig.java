@@ -13,6 +13,7 @@ import org.springframework.core.annotation.Order;
 import org.springframework.transaction.PlatformTransactionManager;
 import za.co.fnb.dcre.cde.service.ScheduleTasklet;
 import za.co.fnb.dcre.platform.batch.CrdbRetryExceptionHandler;
+import za.co.fnb.dcre.platform.batch.HeartbeatWriter;
 import za.co.fnb.dcre.platform.batch.OutcomeSeamListener;
 import za.co.fnb.dcre.platform.batch.StaleExecutionSweeper;
 
@@ -37,10 +38,11 @@ public class CdeJobConfig {
     }
 
     @Bean
-    public Job cdeJob(JobRepository repo, Step scheduleStep,
+    public Job cdeJob(JobRepository repo, Step scheduleStep, HeartbeatWriter heartbeatWriter,
                       @Value("${dcre.exchange-root}") String exchangeRoot) {
         return new JobBuilder("cdeJob", repo)
                 .listener(new OutcomeSeamListener("cde", exchangeRoot, execution -> "BUSINESS_ACCEPTED"))
+                .listener(heartbeatWriter)
                 .start(scheduleStep)
                 .build();
     }
