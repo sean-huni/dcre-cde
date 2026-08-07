@@ -13,10 +13,27 @@ import org.testcontainers.utility.DockerImageName;
  * Liquibase-managed schema, scheduler disabled, processing lead 2 so the BDD
  * scenarios exercise the R-38 2nd-amendment lead-then-roll placeholder.
  */
+@org.springframework.context.annotation.Import(CucumberSpringConfig.FixedClock.class)
 @CucumberContextConfiguration
 @SpringBootTest(properties = {"spring.batch.job.enabled=false", "dcre.exchange-root=build/test-exchange",
         "dcre.cde.processing-lead-days=2"})
 public class CucumberSpringConfig {
+
+    /**
+     * A-77 (SCRUM-107): scheduling is clock-aware, so these date-driven scenarios must steer the
+     * calendar rather than inherit the wall clock. Fixed BEFORE every fixture date in the feature
+     * files (earliest 2026-02-20), so collectionDate >= today throughout and the scenarios assert
+     * the pure R-38 rule exactly, unchanged by the back-date guard.
+     */
+    @org.springframework.boot.test.context.TestConfiguration
+    public static class FixedClock {
+        @org.springframework.context.annotation.Bean
+        public java.time.Clock clock() {
+            return java.time.Clock.fixed(java.time.Instant.parse("2026-01-01T00:00:00Z"),
+                    java.time.ZoneOffset.UTC);
+        }
+    }
+
 
     static final CockroachContainer CRDB =
             new CockroachContainer(DockerImageName.parse("cockroachdb/cockroach:v26.2.3"));
@@ -31,4 +48,5 @@ public class CucumberSpringConfig {
         registry.add("spring.datasource.username", CRDB::getUsername);
         registry.add("spring.datasource.password", CRDB::getPassword);
     }
+
 }
