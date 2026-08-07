@@ -32,6 +32,14 @@ public class CdeJobConfig {
      */
     private final CrdbRetryExceptionHandler crdbRetry = new CrdbRetryExceptionHandler("CDE");
 
+    /** A-77 (SCRUM-107): the system clock as a BEAN, so business logic never calls now()
+     *  directly and date-driven tests can steer the calendar with Clock.fixed. */
+    @Bean
+    @org.springframework.boot.autoconfigure.condition.ConditionalOnMissingBean(java.time.Clock.class)
+    java.time.Clock systemClock() {
+        return java.time.Clock.systemDefaultZone();
+    }
+
     @Bean
     public Step scheduleStep(JobRepository repo, PlatformTransactionManager tx, ScheduleTasklet tasklet) {
         return new StepBuilder("scheduleStep", repo).tasklet(tasklet, tx).exceptionHandler(crdbRetry).build();

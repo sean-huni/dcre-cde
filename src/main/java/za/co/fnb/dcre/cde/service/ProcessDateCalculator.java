@@ -21,7 +21,27 @@ public final class ProcessDateCalculator {
 
     public static LocalDate calculate(LocalDate collectionDate, int processingLeadDays,
                                       Set<LocalDate> holidays) {
-        LocalDate processDate = roll(collectionDate.plusDays(processingLeadDays), holidays);
+        return calculate(collectionDate, processingLeadDays, holidays, null);
+    }
+
+    /**
+     * A-77 (SCRUM-107): clock-aware. R-37 has CRW emit only where
+     * {@code process_date = today}, so a process date in the PAST is not "late", it is
+     * UNREACHABLE: the row is warehoused for a day that has already gone and is never emitted.
+     * Observed on the cluster, 8 rows at 2026-07-29 against a run date of 2026-08-07, and since
+     * R-37 was amended to gate DC completion on an emission, the arrival then never completed.
+     *
+     * <p>The lead is therefore applied from whichever of the collection date and {@code today}
+     * is LATER, so a back-dated instruction is processed at the earliest date it actually can
+     * be. Futured instructions are untouched, because for them the collection date is already
+     * the later of the two: warehousing is preserved exactly.
+     *
+     * @param today the run date, or null to keep the pure, clock-free behaviour
+     */
+    public static LocalDate calculate(LocalDate collectionDate, int processingLeadDays,
+                                      Set<LocalDate> holidays, LocalDate today) {
+        LocalDate base = today == null || !today.isAfter(collectionDate) ? collectionDate : today;
+        LocalDate processDate = roll(base.plusDays(processingLeadDays), holidays);
         if (!processDate.isAfter(collectionDate)) {
             throw new IllegalStateException("process date " + processDate
                     + " must follow collection date " + collectionDate

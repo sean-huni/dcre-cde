@@ -23,7 +23,24 @@ import static org.junit.jupiter.api.Assertions.assertTrue;
 
 @SpringBootTest(properties = {"spring.batch.job.enabled=false", "dcre.exchange-root=build/test-exchange",
         "dcre.cde.processing-lead-days=2"})
+@org.springframework.context.annotation.Import(CdeJobTest.FixedClock.class)
 class CdeJobTest {
+
+    /**
+     * A-77 (SCRUM-107): these are DATE-DRIVEN tests with back-dated fixtures. Scheduling is now
+     * clock-aware, so the calendar must be steered rather than inherited from the wall clock,
+     * or every assertion here silently re-dates itself as the fixtures age. Fixed BEFORE every fixture date, so
+     * collectionDate >= today throughout and the pre-A-77 behaviour is asserted exactly.
+     */
+    @org.springframework.boot.test.context.TestConfiguration
+    static class FixedClock {
+        @org.springframework.context.annotation.Bean
+        java.time.Clock clock() {
+            return java.time.Clock.fixed(java.time.Instant.parse("2026-01-01T00:00:00Z"),
+                    java.time.ZoneOffset.UTC);
+        }
+    }
+
 
     static final CockroachContainer CRDB =
             new CockroachContainer(DockerImageName.parse("cockroachdb/cockroach:v26.2.3"));

@@ -42,11 +42,17 @@ public class ScheduleService {
     private final PublicHolidayViewRepo holidays;
     private final int processingLeadDays;
     private final String country;
+    private final java.time.Clock clock;
 
     public ScheduleService(TxHeaderViewRepo headers, PassVerdictViewRepo verdicts,
                            CdeScheduleRepo schedules, PublicHolidayViewRepo holidays,
                            @Value("${dcre.cde.processing-lead-days:2}") int processingLeadDays,
-                           @Value("${dcre.cde.country:ZA}") String country) {
+                           @Value("${dcre.cde.country:ZA}") String country,
+                           // A-77 (SCRUM-107): business time as INPUT, never now() inside the
+                           // logic. Injected so date-driven tests steer the calendar with a
+                           // fixed clock instead of being pinned to the wall clock.
+                           java.time.Clock clock) {
+        this.clock = clock;
         this.headers = headers;
         this.verdicts = verdicts;
         this.schedules = schedules;
@@ -60,8 +66,11 @@ public class ScheduleService {
         TxHeaderView header = headers.findByArrivalId(arrivalId).orElseThrow();
         LocalDate collection = LocalDate.parse(header.getCollectionDate().strip(),
                 DateTimeFormatter.BASIC_ISO_DATE);
+        // A-77 (SCRUM-107): pass the run date so a back-dated instruction cannot be scheduled
+        // into the past. CRW emits only where process_date = today (R-37), so a past date is
+        // unreachable rather than late, and the arrival would never complete.
         LocalDate processDate = ProcessDateCalculator.calculate(collection, processingLeadDays,
-                syncedHolidays(collection));
+                syncedHolidays(collection), LocalDate.now(clock));
         int scheduled = schedules.upsertAllPassRows(arrivalId, processDate);
         warnExcluded(arrivalId);
         return scheduled;
