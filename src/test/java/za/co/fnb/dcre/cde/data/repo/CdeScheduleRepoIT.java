@@ -8,6 +8,7 @@ import org.springframework.jdbc.core.JdbcTemplate;
 import org.springframework.test.context.DynamicPropertyRegistry;
 import org.springframework.test.context.DynamicPropertySource;
 import org.testcontainers.containers.CockroachContainer;
+import za.co.fnb.dcre.cde.HolidayCalendarFixture;
 import org.testcontainers.utility.DockerImageName;
 
 import java.time.LocalDate;
@@ -30,11 +31,13 @@ class CdeScheduleRepoIT {
 
     static {
         CRDB.start();
+        HolidayCalendarFixture.create(CRDB);
     }
 
     @DynamicPropertySource
     static void props(DynamicPropertyRegistry registry) {
         registry.add("spring.datasource.url", CRDB::getJdbcUrl);
+        registry.add("dcre.cde.holidays-db-url", () -> HolidayCalendarFixture.url(CRDB));
         registry.add("spring.datasource.username", CRDB::getUsername);
         registry.add("spring.datasource.password", CRDB::getPassword);
     }

@@ -47,11 +47,13 @@ class CdeJobTest {
 
     static {
         CRDB.start();
+        HolidayCalendarFixture.create(CRDB);
     }
 
     @DynamicPropertySource
     static void props(DynamicPropertyRegistry registry) {
         registry.add("spring.datasource.url", CRDB::getJdbcUrl);
+        registry.add("dcre.cde.holidays-db-url", () -> HolidayCalendarFixture.url(CRDB));
         registry.add("spring.datasource.username", CRDB::getUsername);
         registry.add("spring.datasource.password", CRDB::getPassword);
     }
@@ -75,7 +77,7 @@ class CdeJobTest {
         jdbc.execute("CREATE TABLE IF NOT EXISTS tx_entry (id UUID DEFAULT gen_random_uuid() PRIMARY KEY,"
                 + " arrival_id UUID, sequence INT, e2e VARCHAR(35), UNIQUE (arrival_id, sequence))");
         // Fail-closed guard (R-38): the collection year must have at least one synced ZA holiday.
-        jdbc.update("INSERT INTO public_holiday (country, holiday_date) VALUES (?,?)"
+        HolidayCalendarFixture.jdbc(CRDB).update("INSERT INTO public_holiday (country, holiday_date) VALUES (?,?)"
                 + " ON CONFLICT (country, holiday_date) DO NOTHING", "ZA", "2026-12-25");
         jdbc.update("UPSERT INTO tx_header (arrival_id, business_date) VALUES (?,?)", arrival, "20260711");
         for (int i = 1; i <= 30; i++) {

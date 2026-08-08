@@ -1,5 +1,7 @@
 package za.co.fnb.dcre.cde.bdd;
 
+import za.co.fnb.dcre.cde.HolidayCalendarFixture;
+
 import ch.qos.logback.classic.Level;
 import ch.qos.logback.classic.Logger;
 import ch.qos.logback.classic.spi.ILoggingEvent;
@@ -81,7 +83,7 @@ public class CdeScheduleSteps {
 
     @Given("no ZA public holidays are synced for {int}")
     public void noHolidaysSyncedFor(int year) {
-        assertEquals(0, jdbc.queryForObject("SELECT count(*) FROM public_holiday"
+        assertEquals(0, HolidayCalendarFixture.jdbc(CucumberSpringConfig.CRDB).queryForObject("SELECT count(*) FROM public_holiday"
                         + " WHERE country='ZA' AND holiday_date >= ?::date AND holiday_date < ?::date",
                 Integer.class, year + "-01-01", (year + 1) + "-01-01"));
     }
@@ -182,7 +184,7 @@ public class CdeScheduleSteps {
     }
 
     private void seedHoliday(String date) {
-        jdbc.update("INSERT INTO public_holiday (country, holiday_date) VALUES (?,?)"
+        HolidayCalendarFixture.jdbc(CucumberSpringConfig.CRDB).update("INSERT INTO public_holiday (country, holiday_date) VALUES (?,?)"
                 + " ON CONFLICT (country, holiday_date) DO NOTHING", "ZA", date);
     }
 }

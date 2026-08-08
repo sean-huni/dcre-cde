@@ -28,5 +28,18 @@ dcre:
     # Lead-then-roll is the R-35 SYNTHETIC-CONTRACT placeholder for the unrecovered
     # collection-cycle rule (A-3); must be >= 1 so process date follows collection date.
     processing-lead-days: ${DCRE_CDE_PROCESSING_LEAD_DAYS:2}
-    # Holiday-calendar country for the R-38 roll (public_holiday is synced by dcre-hcs)
+    # Holiday-calendar country for the R-38 roll (the calendar is synced by dcre-hcs)
     country: ${DCRE_CDE_COUNTRY:ZA}
+    # Second, READ-ONLY connection to the HCS-owned calendar in dcre_hcs (R-04/R-10).
+    # The calendar used to live in dcre_col and CDE created it there itself; the owner
+    # ruled that out on 2026-08-08 as a 12FactorApp/SOLID violation, so CDE now reads
+    # the published hol_cde_view in another context's database and creates nothing.
+    # NOT the primary spring.datasource.* creds, so the standing-cluster cde role holds
+    # only SELECT on hol_cde_view.
+    # The localhost default is the clean-clone dev target ONLY: HolidaysDatasourceConfig
+    # makes it fatal at startup inside a pod, which is the lesson from the CTV projection
+    # gate that shipped with nothing setting its URL and quietly aimed at localhost.
+    # Keep this literal in step with HolidaysDatasourceConfig.LOCAL_DEV_URL (parity-tested).
+    holidays-db-url: ${DCRE_CDE_HOLIDAYS_DB_URL:jdbc:postgresql://localhost:26257/dcre_hcs?sslmode=disable}
+    holidays-db-user: ${DCRE_CDE_HOLIDAYS_DB_USER:root}
+    holidays-db-password: ${DCRE_CDE_HOLIDAYS_DB_PASSWORD:}

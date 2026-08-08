@@ -12,6 +12,5 @@
 
     <include file="db/changelog/2026/08/001-batch-metadata.xml"/>
     <include file="db/changelog/2026/08/002-cde-schedule.xml"/>
-    <include file="db/changelog/2026/08/003-public-holiday.xml"/>
 
 </databaseChangeLog>
