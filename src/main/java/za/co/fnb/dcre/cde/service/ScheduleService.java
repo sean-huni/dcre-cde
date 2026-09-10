@@ -8,7 +8,7 @@ import za.co.fnb.dcre.cde.data.model.ExcludedVerdict;
 import za.co.fnb.dcre.cde.data.model.TxHeaderView;
 import za.co.fnb.dcre.cde.data.repo.CdeScheduleRepo;
 import za.co.fnb.dcre.cde.data.repo.PassVerdictViewRepo;
-import za.co.fnb.dcre.cde.data.repo.PublicHolidayViewRepo;
+import za.co.fnb.dcre.cde.data.repo.HolidayCalendarDao;
 import za.co.fnb.dcre.cde.data.repo.TxHeaderViewRepo;
 
 import java.time.LocalDate;
@@ -39,13 +39,13 @@ public class ScheduleService {
     private final TxHeaderViewRepo headers;
     private final PassVerdictViewRepo verdicts;
     private final CdeScheduleRepo schedules;
-    private final PublicHolidayViewRepo holidays;
+    private final HolidayCalendarDao holidays;
     private final int processingLeadDays;
     private final String country;
     private final java.time.Clock clock;
 
     public ScheduleService(TxHeaderViewRepo headers, PassVerdictViewRepo verdicts,
-                           CdeScheduleRepo schedules, PublicHolidayViewRepo holidays,
+                           CdeScheduleRepo schedules, HolidayCalendarDao holidays,
                            @Value("${dcre.cde.processing-lead-days:2}") int processingLeadDays,
                            @Value("${dcre.cde.country:ZA}") String country,
                            // A-77 (SCRUM-107): business time as INPUT, never now() inside the

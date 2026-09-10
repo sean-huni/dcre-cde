@@ -51,7 +51,10 @@ Precedence: yml default < environment variable.
 
 | Env var | Default | Purpose |
 |---|---|---|
-| `DCRE_DB_URL` | `jdbc:postgresql://localhost:26257/dcre_col?sslmode=disable` | shared CockroachDB |
+| `DCRE_DB_URL` | `jdbc:postgresql://localhost:26257/dcre_col?sslmode=disable` | collections CockroachDB (primary) |
+| `DCRE_CDE_HOLIDAYS_DB_URL` | `jdbc:postgresql://localhost:26257/dcre_hcs?sslmode=disable` | READ-ONLY connection to the hcs-owned calendar; CDE reads `hol_cde_view` and never `public_holiday`. FATAL at startup if left at this dev default inside a pod |
+| `DCRE_CDE_HOLIDAYS_DB_USER` | `root` | dedicated role; needs only `SELECT` on `hol_cde_view` |
+| `DCRE_CDE_HOLIDAYS_DB_PASSWORD` | (blank) | dev clean-clone default |
 | `DCRE_DB_USER` | `root` | DB user |
 | `DCRE_DB_PASSWORD` | (empty) | DB password |
 | `DCRE_EXCHANGE_ROOT` | `../../../../../infra/dcre-infra/exchange` | outcome seam directory (resolves to dcre-infra's `exchange/` in the canonical fleet checkout; deployed contexts set an absolute path) |

@@ -1,0 +1,69 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<databaseChangeLog
+        xmlns="http://www.liquibase.org/xml/ns/dbchangelog"
+        xmlns:xsi="http://www.w3.org/2001/XMLSchema-instance"
+        xsi:schemaLocation="http://www.liquibase.org/xml/ns/dbchangelog
+        http://www.liquibase.org/xml/ns/dbchangelog/dbchangelog-latest.xsd">
+
+    <!-- ============================================================================
+         CDE v1 BASELINE, part 2 of 3: the CDE domain schema.
+
+         THIS IS THE VERSION 1 BASELINE. Every DCRE database is dropped and recreated
+         at the v1 cutover, so this changelog only ever runs against an EMPTY schema.
+         That is why the usual re-run guards are absent, and their absence is
+         deliberate rather than an oversight:
+
+           - no IF-NOT-EXISTS clause. It guarded against a table created by an
+             earlier, different changelog. CDE is the only writer of cde_schedule
+             (R-04) and no other service in the fleet creates it: CRW reads it
+             through crw_emission_owed and guards the VIEW rather than minting the
+             table. On an empty schema this CREATE is therefore the first and only
+             one, so the clause could not fire, and a guard that cannot fire is dead
+             weight that would silently skip real work if the assumption ever
+             changed.
+           - no ANY-checksum override, for the same reason it is absent from part 1:
+             with no recorded history there is no checksum to contradict, and
+             suppressing checksum validation on a baseline would only disarm the
+             control for every FUTURE edit.
+
+         Pure typed tags, no raw-SQL body: the previous form hid its DDL from static
+         analysis and pinned the table to one dialect. The UNIQUE constraint gains a
+         name it did not have before, which a typed declaration requires and which
+         makes the constraint addressable in a later changeset.
+
+         Schedule semantics per R-37: one row per PASSing detail record, carrying the
+         process date the R-38 lead-then-roll calculation produced for it.
+         ============================================================================ -->
+
+    <changeSet id="cde-v1-cde-schedule" author="dcre">
+        <createTable tableName="cde_schedule">
+            <column name="id" type="UUID" defaultValueComputed="gen_random_uuid()">
+                <constraints primaryKey="true" nullable="false"/>
+            </column>
+            <column name="arrival_id" type="UUID">
+                <constraints nullable="false"/>
+            </column>
+            <column name="sequence" type="INT">
+                <constraints nullable="false"/>
+            </column>
+            <column name="process_date" type="DATE">
+                <constraints nullable="false"/>
+            </column>
+            <column name="version" type="BIGINT" defaultValueNumeric="0">
+                <constraints nullable="false"/>
+            </column>
+            <column name="created_at" type="TIMESTAMPTZ" defaultValueComputed="now()">
+                <constraints nullable="false"/>
+            </column>
+            <column name="updated_at" type="TIMESTAMPTZ" defaultValueComputed="now()">
+                <constraints nullable="false"/>
+            </column>
+        </createTable>
+        <addUniqueConstraint tableName="cde_schedule" columnNames="arrival_id, sequence"
+                             constraintName="uq_cde_schedule_arrival_sequence"/>
+        <rollback>
+            <dropTable tableName="cde_schedule"/>
+        </rollback>
+    </changeSet>
+
+</databaseChangeLog>

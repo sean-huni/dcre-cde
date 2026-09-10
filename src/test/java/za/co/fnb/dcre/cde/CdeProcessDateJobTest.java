@@ -57,11 +57,13 @@ class CdeProcessDateJobTest {
 
     static {
         CRDB.start();
+        HolidayCalendarFixture.create(CRDB);
     }
 
     @DynamicPropertySource
     static void props(DynamicPropertyRegistry registry) {
         registry.add("spring.datasource.url", CRDB::getJdbcUrl);
+        registry.add("dcre.cde.holidays-db-url", () -> HolidayCalendarFixture.url(CRDB));
         registry.add("spring.datasource.username", CRDB::getUsername);
         registry.add("spring.datasource.password", CRDB::getPassword);
     }
@@ -160,7 +162,7 @@ class CdeProcessDateJobTest {
     }
 
     private void seedHoliday(String date) {
-        jdbc.update("INSERT INTO public_holiday (country, holiday_date) VALUES (?,?)"
+        HolidayCalendarFixture.jdbc(CRDB).update("INSERT INTO public_holiday (country, holiday_date) VALUES (?,?)"
                 + " ON CONFLICT (country, holiday_date) DO NOTHING", "ZA", date);
     }
 
