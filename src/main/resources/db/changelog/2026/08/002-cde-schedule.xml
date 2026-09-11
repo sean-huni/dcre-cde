@@ -36,6 +36,10 @@
          ============================================================================ -->
 
     <changeSet id="cde-v1-cde-schedule" author="dcre">
+        <preConditions onFail="MARK_RAN">
+            <not><tableExists tableName="cde_schedule"/></not>
+        </preConditions>
+        
         <createTable tableName="cde_schedule">
             <column name="id" type="UUID" defaultValueComputed="gen_random_uuid()">
                 <constraints primaryKey="true" nullable="false"/>
