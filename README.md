@@ -38,6 +38,7 @@ For each PASS verdict of the arrival, Process_Date = roll(client-supplied collec
 
 - Reads (`dcre_col`): `tx_header` (CRR-owned; its `business_date` column carries the client-supplied collection date), `validation_log` (CTV verdicts), `tx_entry` (for the `e2e` in exclusion WARNs).
 - Reads (`dcre_hcs`): the HCS-published `hol_cde_view` only, horizon 60 days past the collection date. CDE never reads or creates `public_holiday`.
+- **Known gap:** nothing on dcre-hcs `dev` creates `hol_cde_view`; its creator (the `001-public-holiday.xml` changeset) lives only on the unmerged hcs branch `SCRUM-107-feat-shared-reference-context` (checked 2026-09-28). Until that merges, the holidays read has no view to select from.
 - Writes (`dcre_col`): `cde_schedule` (CDE single writer, `UNIQUE(arrival_id, sequence)`), plus its `CDE_BATCH_*` tables.
 - Liquibase history in `cde_databasechangelog` / `cde_databasechangeloglock`. Changesets under `db/changelog/2026/08/`: `001-batch-metadata.xml` (`CDE_BATCH_*`), `002-cde-schedule.xml`.
 
@@ -46,6 +47,7 @@ For each PASS verdict of the arrival, Process_Date = roll(client-supplied collec
 - Java 25 (`.sdkmanrc`: `java=25-tem`; `build.gradle` sets source/target compatibility 25)
 - Gradle 9.5.1 via the wrapper
 - Docker (Testcontainers CockroachDB and the image build)
+- The `dcre_hcs` database behind the holidays read must be created by hand (`CREATE DATABASE IF NOT EXISTS dcre_hcs;`): dcre-infra's `scripts/crdb-init.sql` creates only `dcre_col`, `agt_ops` and `dcre_man` (checked 2026-09-28).
 - Platform libraries in Maven Local (`repositories { mavenCentral(); mavenLocal() }`):
 
 | Module | Version | Used for |
@@ -119,7 +121,7 @@ docker build -t dcre-cde:$VERSION .              # eclipse-temurin:25-jre-alpine
 kind load docker-image --name dcre-dev dcre-cde:$VERSION
 ```
 
-AGT reads the image from `AGT_CDE_IMAGE` (empty by default, which leaves the stage launch-disabled); dcre-infra `scripts/switch-version.sh <version>` sets `AGT_CDE_IMAGE=dcre-cde:<version>` on the AGT deployment (checked 2026-09-28). Per arrival AGT creates a Job in the collections flow namespace (AGT `AGT_NAMESPACE_COL`, default `dcre-col`) with program arg `arrival.id=<uuid>` and env `JOB_NAME`, `DCRE_DB_URL` (AGT `service-db-url`, `dcre_col`), `DCRE_CDE_HOLIDAYS_DB_URL` (AGT `hcs-service-db-url`, `dcre_hcs`), `DCRE_EXCHANGE_ROOT=/exchange`, `DCRE_AGTOPS_DB_URL` and `DCRE_AGTOPS_DB_USER` (AGT `JobLauncher` on origin/dev, checked 2026-09-28). Releases are digits-only 3-component SemVer git tags, uniform across the fleet.
+AGT reads the image from `AGT_CDE_IMAGE` (empty by default, which leaves the stage launch-disabled); dcre-infra `scripts/switch-version.sh <version>` sets `AGT_CDE_IMAGE=dcre-cde:<version>` on the AGT deployment (checked 2026-09-28). Per arrival AGT creates a Job in the collections flow namespace (AGT `AGT_NAMESPACE_COL`, default `dcre-col`) with program arg `arrival.id=<uuid>` and env `JOB_NAME`, `DCRE_DB_URL` (AGT `service-db-url`, `dcre_col`), `DCRE_CDE_HOLIDAYS_DB_URL` (AGT `hcs-service-db-url`, `dcre_hcs`), `DCRE_EXCHANGE_ROOT=/exchange`, `DCRE_AGTOPS_DB_URL` and `DCRE_AGTOPS_DB_USER` (AGT `JobLauncher` on origin/dev, checked 2026-09-28). Release tags are digits-only 3-component SemVer; this repo carries 1.0.0 through 2.2.1, and tagging is not uniform across the fleet (the payments stages carry none; `git ls-remote --tags`, checked 2026-09-28).
 
 ## Related repositories
 
